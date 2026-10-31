@@ -118,6 +118,8 @@ input:focus, select:focus { border-color: var(--accent); }
 .timeline .pending .dot { background: #fff; border: 2px dashed #cbd5e1; box-shadow: none; }
 .timeline .pending { color: var(--muted); }
 .empty { color: var(--muted); text-align: center; padding: 1.2rem; font-size: .9rem; }
+.timeline li.empty-row { display: block; }
+.bar .fill.zero { min-height: 0; }
 
 /* semana */
 .week { display: grid; grid-template-columns: repeat(7, 1fr); gap: .75rem; align-items: end; height: 170px; }

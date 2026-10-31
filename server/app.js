@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
-import { extname, join, normalize, resolve } from 'node:path';
-import { createSession, deleteSession, hashPassword, userFromToken, verifyPassword } from './auth.js';
+import { extname, join, normalize, resolve, sep } from 'node:path';
+import { burnPasswordCheck, createSession, deleteSession, hashPassword, userFromToken, verifyPassword } from './auth.js';
+import { RateLimiter, clientIp, securityHeaders } from './security.js';
 import {
   PUNCH_TYPES, dayKey, nextAllowed, statusFromLast, toCSV, workedMinutes,
   validateName, validatePassword, validateUsername,
@@ -17,14 +18,14 @@ const MIME = {
 };
 
 class HttpError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
+  constructor(status, message, headers = {}) { super(message); this.status = status; this.headers = headers; }
 }
 
 function send(res, status, body, headers = {}) {
   const isText = typeof body === 'string' || Buffer.isBuffer(body);
   res.writeHead(status, {
     'Content-Type': isText ? 'text/plain; charset=utf-8' : 'application/json; charset=utf-8',
-    'X-Content-Type-Options': 'nosniff',
+    ...securityHeaders({ api: true }),
     ...headers,
   });
   res.end(isText ? body : JSON.stringify(body));
@@ -43,24 +44,21 @@ async function readJson(req) {
   catch { throw new HttpError(400, 'JSON inválido'); }
 }
 
-// Limite simples de tentativas de login por IP.
-function createLoginLimiter({ max = 10, windowMs = 15 * 60 * 1000 } = {}) {
-  const hits = new Map();
-  return (ip) => {
-    const now = Date.now();
-    const entry = hits.get(ip);
-    if (!entry || now - entry.start > windowMs) {
-      hits.set(ip, { start: now, count: 1 });
-      return true;
-    }
-    entry.count += 1;
-    return entry.count <= max;
-  };
-}
+const DEFAULT_LIMITS = {
+  loginIp: { max: 10, windowMs: 15 * 60 * 1000 },      // falhas de login por IP
+  loginUser: { max: 20, windowMs: 15 * 60 * 1000 },    // falhas por usuário (ataque distribuído)
+  register: { max: 10, windowMs: 60 * 60 * 1000 },     // tentativas de cadastro por IP
+};
 
-export function createApp(db, { timeZone = 'America/Sao_Paulo', publicDir } = {}) {
+export function createApp(db, { timeZone = 'America/Sao_Paulo', publicDir, trustProxy = false, limits = {} } = {}) {
   const staticRoot = publicDir ? resolve(publicDir) : null;
-  const allowLogin = createLoginLimiter();
+  const L = { ...DEFAULT_LIMITS, ...limits };
+  const limiters = {
+    loginIp: new RateLimiter(L.loginIp),
+    loginUser: new RateLimiter(L.loginUser),
+    register: new RateLimiter(L.register),
+  };
+  const tooMany = (secs) => new HttpError(429, 'Muitas tentativas. Aguarde alguns minutos.', { 'Retry-After': String(secs) });
 
   const q = {
     userByUsername: db.prepare('SELECT * FROM users WHERE username = ?'),
@@ -112,24 +110,48 @@ export function createApp(db, { timeZone = 'America/Sao_Paulo', publicDir } = {}
     'GET /api/health': () => ({ status: 'ok', mode: 'api', timeZone }),
 
     'POST /api/auth/register': async (req) => {
+      const ip = clientIp(req, trustProxy);
+      const wait = limiters.register.retryAfter(ip);
+      if (wait) throw tooMany(wait);
       const { username, name, password } = await readJson(req);
       const u = String(username || '').trim().toLowerCase();
       if (!validateUsername(u)) throw new HttpError(400, 'Usuário deve ter de 3 a 30 caracteres: letras minúsculas, números, ponto, hífen ou _');
       if (!validateName(name)) throw new HttpError(400, 'Informe seu nome (2 a 60 caracteres)');
       if (!validatePassword(password)) throw new HttpError(400, 'A senha precisa ter pelo menos 6 caracteres');
+      // Conta antes de checar se o usuário existe: assim não dá para usar o
+      // cadastro para descobrir, sem limite, quais usuários estão cadastrados.
+      limiters.register.hit(ip);
       if (q.userByUsername.get(u)) throw new HttpError(409, 'Esse usuário já existe');
-      const { lastInsertRowid } = q.insertUser.run(u, name.trim(), hashPassword(password));
+      let lastInsertRowid;
+      try {
+        ({ lastInsertRowid } = q.insertUser.run(u, name.trim(), hashPassword(password)));
+      } catch (err) {
+        // Dois cadastros simultâneos com o mesmo usuário
+        if (/UNIQUE/i.test(String(err.message))) throw new HttpError(409, 'Esse usuário já existe');
+        throw err;
+      }
       const id = Number(lastInsertRowid);
       return [201, { token: createSession(db, id), user: { id, username: u, name: name.trim(), role: 'employee' } }];
     },
 
     'POST /api/auth/login': async (req) => {
-      if (!allowLogin(req.socket.remoteAddress)) throw new HttpError(429, 'Muitas tentativas. Aguarde alguns minutos.');
-      const { username, password } = await readJson(req);
-      const row = q.userByUsername.get(String(username || '').trim().toLowerCase());
-      if (!row || !verifyPassword(String(password || ''), row.password_hash)) {
+      const ip = clientIp(req, trustProxy);
+      const body = await readJson(req);
+      const uname = String(body.username || '').trim().toLowerCase().slice(0, 64);
+      const password = String(body.password || '').slice(0, 200);
+      const wait = Math.max(limiters.loginIp.retryAfter(ip), limiters.loginUser.retryAfter(uname));
+      if (wait) throw tooMany(wait);
+
+      const row = q.userByUsername.get(uname);
+      // Mesmo trabalho com ou sem usuário, para não revelar quem existe.
+      const ok = row ? verifyPassword(password, row.password_hash) : (burnPasswordCheck(password), false);
+      if (!ok) {
+        limiters.loginIp.hit(ip);
+        limiters.loginUser.hit(uname);
         throw new HttpError(401, 'Usuário ou senha incorretos');
       }
+      limiters.loginIp.reset(ip);
+      limiters.loginUser.reset(uname);
       const { password_hash, created_at, ...user } = row;
       return { token: createSession(db, row.id), user };
     },
@@ -211,12 +233,16 @@ export function createApp(db, { timeZone = 'America/Sao_Paulo', publicDir } = {}
 
   async function serveStatic(res, pathname) {
     if (!staticRoot) return send(res, 404, { error: 'Não encontrado' });
-    const rel = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '');
+    let decoded;
+    try { decoded = decodeURIComponent(pathname); } catch { return send(res, 400, { error: 'URL inválida' }); }
+    if (decoded.includes('\0')) return send(res, 400, { error: 'URL inválida' });
+    const rel = decoded === '/' ? 'index.html' : decoded.replace(/^\/+/, '');
     const file = resolve(join(staticRoot, normalize(rel)));
-    if (!file.startsWith(staticRoot)) return send(res, 403, { error: 'Proibido' });
+    // Compara com o separador no fim, para "public-evil" não passar como "public".
+    if (file !== staticRoot && !file.startsWith(staticRoot + sep)) return send(res, 403, { error: 'Proibido' });
     try {
       const data = await readFile(file);
-      res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream', 'X-Content-Type-Options': 'nosniff' });
+      res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream', ...securityHeaders() });
       res.end(data);
     } catch {
       send(res, 404, { error: 'Não encontrado' });
@@ -224,8 +250,8 @@ export function createApp(db, { timeZone = 'America/Sao_Paulo', publicDir } = {}
   }
 
   return async function handler(req, res) {
-    const url = new URL(req.url, 'http://localhost');
     try {
+      const url = new URL(req.url, 'http://localhost');
       if (!url.pathname.startsWith('/api/')) {
         if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, { error: 'Método não permitido' });
         return await serveStatic(res, url.pathname);
@@ -244,7 +270,7 @@ export function createApp(db, { timeZone = 'America/Sao_Paulo', publicDir } = {}
     } catch (err) {
       const status = err instanceof HttpError ? err.status : 500;
       if (status === 500) console.error(err);
-      send(res, status, { error: status === 500 ? 'Erro interno' : err.message });
+      send(res, status, { error: status === 500 ? 'Erro interno' : err.message }, err.headers);
     }
   };
 }

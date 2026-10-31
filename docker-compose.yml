@@ -6,7 +6,10 @@ services:
     ports:
       - "3000:3000"
     environment:
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-troque-esta-senha}
+      # Obrigatória: o container não sobe sem uma senha forte (12+ caracteres)
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Defina ADMIN_PASSWORD com uma senha forte}
+      # Use "true" apenas atrás de um proxy reverso (Nginx, Caddy, ALB)
+      TRUST_PROXY: ${TRUST_PROXY:-false}
       APP_TIMEZONE: America/Sao_Paulo
     volumes:
       - clockr-data:/app/data

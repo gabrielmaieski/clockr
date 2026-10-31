@@ -25,7 +25,7 @@ jobs:
       - name: Build da imagem
         run: docker build -t clockr:ci .
       - name: Sobe o container
-        run: docker run -d --name clockr -p 3000:3000 -e ADMIN_PASSWORD=ci-senha clockr:ci
+        run: docker run -d --name clockr -p 3000:3000 -e ADMIN_PASSWORD=ci-senha-forte-123 clockr:ci
       - name: Verifica a API
         run: |
           for i in $(seq 1 20); do
@@ -34,3 +34,17 @@ jobs:
           done
           docker logs clockr
           exit 1
+      - name: Confere cabeçalhos de segurança
+        run: |
+          headers=$(curl -fsSI http://localhost:3000/)
+          echo "$headers"
+          echo "$headers" | grep -qi '^content-security-policy:'
+          echo "$headers" | grep -qi '^x-frame-options: DENY'
+      - name: Recusa subir sem ADMIN_PASSWORD
+        run: |
+          set +e
+          timeout 30 docker run --rm clockr:ci
+          code=$?
+          if [ "$code" -ne 1 ]; then
+            echo "Esperado código 1 (erro de configuração), recebido $code"; exit 1
+          fi

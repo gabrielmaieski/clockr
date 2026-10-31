@@ -166,7 +166,7 @@ function renderTimeline() {
   const list = [...todaysPunches()].reverse();
   const el = $('#timeline');
   if (!list.length) {
-    el.innerHTML = '<li class="empty" style="display:block">Nenhuma marcação hoje.</li>';
+    el.innerHTML = '<li class="empty empty-row">Nenhuma marcação hoje.</li>';
     return;
   }
   el.innerHTML = list.map((p) => `
@@ -193,9 +193,11 @@ function renderWeek() {
   $('#week').innerHTML = days.map(({ d, min, today }) => `
     <div class="bar${today ? ' today' : ''}" title="${fmtDate.format(d)}: ${formatMinutes(min)}">
       <span class="v">${min ? formatMinutes(min) : '–'}</span>
-      <div class="track"><div class="fill" style="height:${Math.round((min / max) * 100)}%${min ? '' : ';min-height:0'}"></div></div>
+      <div class="track"><div class="fill${min ? '' : ' zero'}" data-pct="${Math.round((min / max) * 100)}"></div></div>
       <span class="d">${today ? 'hoje' : fmtWeekday.format(d).replace('.', '')}</span>
     </div>`).join('');
+  // Altura via CSSOM: a CSP bloqueia atributos style="" no HTML.
+  $('#week').querySelectorAll('.fill').forEach((f) => { f.style.height = `${f.dataset.pct}%`; });
 }
 
 function renderHistory() {

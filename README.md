@@ -42,7 +42,7 @@ Navegador (HTML, CSS e JavaScript)
 
 - **Back-end:** Node.js 22 sem dependências externas, usando os módulos nativos `node:http`, `node:sqlite` e `node:crypto`
 - **Banco de dados:** SQLite, com índices e chaves estrangeiras
-- **Segurança:** senhas com hash `scrypt` e salt, sessões com token que expiram em 7 dias, limite de tentativas de login e validação de todas as entradas
+- **Segurança:** senhas com `scrypt`, tokens de sessão guardados só como hash, CSP e cabeçalhos de segurança, limite de tentativas e proteção contra injeção de fórmula no CSV (detalhes em [Segurança](#segurança))
 - **Front-end:** JavaScript puro em módulos, responsivo, com a mesma regra de negócio do servidor (`public/js/core.js`)
 - **Infra:** Docker com usuário sem privilégios, volume para o banco e healthcheck
 - **CI/CD:** GitHub Actions roda os testes, faz o build e o teste da imagem Docker e publica a demonstração no GitHub Pages
@@ -54,17 +54,17 @@ Navegador (HTML, CSS e JavaScript)
 ```bash
 git clone https://github.com/gabrielmaieski/clockr.git
 cd clockr
-ADMIN_PASSWORD=sua-senha docker compose up -d --build
+ADMIN_PASSWORD='uma-senha-forte-com-12+' docker compose up -d --build
 ```
 
-Acesse **http://localhost:3000** e entre com o usuário `admin` e a senha definida em `ADMIN_PASSWORD`. Os dados ficam no volume `clockr-data`, então não se perdem ao recriar o container.
+Acesse **http://localhost:3000** e entre com o usuário `admin` e a senha definida em `ADMIN_PASSWORD`. O container **não sobe** sem essa variável, nem com senhas fracas ou padrão. Os dados ficam no volume `clockr-data`, então não se perdem ao recriar o container.
 
 ### Com Node.js
 
 Requer Node.js 22.13 ou mais recente. Não há nada para instalar.
 
 ```bash
-ADMIN_PASSWORD=sua-senha npm start
+npm start   # desenvolvimento: sem ADMIN_PASSWORD, o admin usa a senha admin123
 ```
 
 ### Testes
@@ -91,11 +91,32 @@ npm test
 
 As rotas protegidas usam o cabeçalho `Authorization: Bearer <token>`.
 
+## Segurança
+
+| Proteção | Como funciona |
+| --- | --- |
+| Senhas | Hash `scrypt` com salt; comparação em tempo constante |
+| Login sem pistas | Usuário inexistente leva o mesmo tempo que senha errada, para não revelar quem está cadastrado |
+| Sessões | Token aleatório de 256 bits; o banco guarda só o SHA-256 dele, então um vazamento do banco não dá acesso. Expira em 7 dias e as sessões vencidas são apagadas de hora em hora |
+| Força bruta | Limite de falhas de login por IP e por usuário, e de tentativas de cadastro por IP, com `Retry-After` e memória limitada |
+| Proxy reverso | `X-Forwarded-For` só é considerado com `TRUST_PROXY=true`, para ninguém burlar o limite inventando um IP |
+| XSS e clickjacking | Content-Security-Policy sem `unsafe-inline`, `X-Frame-Options: DENY`, `frame-ancestors 'none'`, `nosniff` e `Referrer-Policy` |
+| SQL injection | Todas as consultas usam parâmetros |
+| Arquivos | Proteção contra path traversal, inclusive barra codificada e byte nulo |
+| CSV | Células que começam com `=`, `+`, `-` ou `@` são neutralizadas, para o Excel não executar fórmulas |
+| Configuração | Em produção, o servidor recusa subir sem senha de admin forte |
+| Container | Roda com usuário sem privilégios |
+
+A suíte `test/security.test.js` cobre cada item acima, incluindo tentativas de ataque. O CI também confere os cabeçalhos e se o container se recusa a subir sem senha.
+
+**Limitações conhecidas:** o servidor responde em HTTP; em produção, coloque um proxy com HTTPS na frente (ex.: Caddy ou Nginx com Let's Encrypt). O cadastro é aberto a qualquer pessoa, o que serve para a demonstração mas não para uma empresa real. O modo demonstração não tem segurança de verdade: os dados ficam só no navegador de quem usa.
+
 ## Variáveis de ambiente
 
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
-| `ADMIN_PASSWORD` | `admin123` | Senha do usuário `admin`, criado na primeira execução |
+| `ADMIN_PASSWORD` | obrigatória em produção | Senha do usuário `admin`, criado na primeira execução. Com `NODE_ENV=production` (padrão no Docker), precisa ter 12+ caracteres e não pode ser uma senha padrão |
+| `TRUST_PROXY` | `false` | Use `true` só atrás de um proxy reverso (Nginx, Caddy, ALB), para identificar o IP real do cliente |
 | `PORT` | `3000` | Porta do servidor |
 | `DB_FILE` | `./data/clockr.db` | Caminho do banco SQLite |
 | `APP_TIMEZONE` | `America/Sao_Paulo` | Fuso usado para definir o "dia" das marcações |

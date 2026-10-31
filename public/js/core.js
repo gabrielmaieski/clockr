@@ -88,9 +88,14 @@ export function validateName(n) {
   return typeof n === 'string' && n.trim().length >= 2 && n.trim().length <= 60;
 }
 
-function csvCell(v) {
-  const s = String(v ?? '');
-  return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+// Células que começam com estes caracteres viram fórmula no Excel/LibreOffice
+// (injeção de fórmula em CSV). Um apóstrofo na frente faz virar texto.
+const FORMULA_START = /^[=+\-@\t\r＝＋－＠]/;
+
+export function csvCell(v) {
+  let s = String(v ?? '');
+  if (FORMULA_START.test(s)) s = `'${s}`;
+  return /[",;\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 // CSV com ponto e vírgula, que é o que o Excel em português espera.
