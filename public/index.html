@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clockr · Registro de ponto</title>
+  <meta name="description" content="Sistema de registro de ponto com painel do funcionário e do gestor.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div id="demo-banner" class="demo-banner" hidden>
+    <span><strong>Modo demonstração.</strong> Os dados ficam salvos só no seu navegador.</span>
+    <button type="button" id="demo-reset" class="link-btn">Restaurar dados de exemplo</button>
+  </div>
+
+  <!-- ===================== LOGIN ===================== -->
+  <main id="view-login" class="login" hidden>
+    <section class="login-hero">
+      <div class="brand brand-light">
+        <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#1e293b"/><circle cx="32" cy="32" r="19" fill="none" stroke="#2dd4bf" stroke-width="5"/><path d="M32 20v12l8 6" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Clockr</span>
+      </div>
+      <h1>Ponto eletrônico simples, do registro ao relatório.</h1>
+      <ul class="hero-list">
+        <li>Marcação de entrada, almoço e saída em um clique</li>
+        <li>Horas trabalhadas calculadas automaticamente</li>
+        <li>Painel do gestor com a equipe em tempo real</li>
+        <li>Relatórios em CSV prontos para o Excel</li>
+      </ul>
+      <p class="hero-foot">Projeto de estudo · Node.js · SQLite · Docker</p>
+    </section>
+
+    <section class="login-panel">
+      <div class="card login-card">
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab" class="tab active" data-tab="login" aria-selected="true">Entrar</button>
+          <button type="button" role="tab" class="tab" data-tab="register" aria-selected="false">Criar conta</button>
+        </div>
+
+        <form id="form-login" class="form" novalidate>
+          <label>Usuário
+            <input name="username" autocomplete="username" required placeholder="seu.usuario">
+          </label>
+          <label>Senha
+            <input name="password" type="password" autocomplete="current-password" required placeholder="••••••">
+          </label>
+          <p class="form-error" role="alert"></p>
+          <button class="btn btn-primary btn-block" type="submit">Entrar</button>
+        </form>
+
+        <form id="form-register" class="form" novalidate hidden>
+          <label>Nome completo
+            <input name="name" autocomplete="name" required placeholder="Maria Silva">
+          </label>
+          <label>Usuário
+            <input name="username" autocomplete="username" required placeholder="maria.silva">
+            <small>Letras minúsculas, números, ponto, hífen ou _</small>
+          </label>
+          <label>Senha
+            <input name="password" type="password" autocomplete="new-password" required placeholder="Mínimo de 6 caracteres">
+          </label>
+          <p class="form-error" role="alert"></p>
+          <button class="btn btn-primary btn-block" type="submit">Criar conta</button>
+        </form>
+
+        <div id="demo-hint" class="demo-hint" hidden>
+          <strong>Contas de demonstração</strong>
+          <div class="demo-accounts">
+            <button type="button" class="chip" data-user="admin" data-pass="admin123">Gestor · admin / admin123</button>
+            <button type="button" class="chip" data-user="ana" data-pass="demo123">Funcionária · ana / demo123</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===================== APP ===================== -->
+  <div id="view-app" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#0f172a"/><circle cx="32" cy="32" r="19" fill="none" stroke="#2dd4bf" stroke-width="5"/><path d="M32 20v12l8 6" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Clockr</span>
+        <span id="role-badge" class="badge"></span>
+      </div>
+      <div class="topbar-user">
+        <div class="avatar" id="avatar"></div>
+        <span id="user-name"></span>
+        <button type="button" class="btn btn-ghost" id="btn-logout">Sair</button>
+      </div>
+    </header>
+
+    <!-- Funcionário -->
+    <main id="view-employee" class="page" hidden>
+      <div class="grid-2">
+        <section class="card clock-card">
+          <p class="muted" id="today-date"></p>
+          <div class="clock" id="clock">--:--:--</div>
+          <span class="status-pill" id="my-status"></span>
+          <div class="actions" id="punch-actions"></div>
+          <p class="muted small" id="next-hint"></p>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <h2>Hoje</h2>
+            <div class="worked"><span class="muted small">Trabalhado</span><strong id="worked-today">0h00</strong></div>
+          </div>
+          <ol class="timeline" id="timeline"></ol>
+        </section>
+      </div>
+
+      <section class="card">
+        <div class="card-head"><h2>Últimos 7 dias</h2></div>
+        <div class="week" id="week"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Histórico</h2>
+          <button type="button" class="btn btn-secondary" id="btn-export-mine">Exportar CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Data</th><th>Hora</th><th>Marcação</th></tr></thead>
+            <tbody id="my-history"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <!-- Gestor -->
+    <main id="view-admin" class="page" hidden>
+      <div class="kpis">
+        <div class="card kpi"><span class="muted small">Funcionários</span><strong id="kpi-employees">0</strong></div>
+        <div class="card kpi"><span class="muted small">Trabalhando agora</span><strong id="kpi-working" class="ok">0</strong></div>
+        <div class="card kpi"><span class="muted small">Em almoço</span><strong id="kpi-lunch" class="warn">0</strong></div>
+        <div class="card kpi"><span class="muted small">Marcações hoje</span><strong id="kpi-punches">0</strong></div>
+      </div>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Equipe agora</h2>
+          <button type="button" class="btn btn-ghost" id="btn-refresh">Atualizar</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Funcionário</th><th>Situação</th><th>Entrada</th><th>Última marcação</th><th class="num">Horas hoje</th></tr></thead>
+            <tbody id="team"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Registros</h2>
+          <div class="filters">
+            <select id="filter-user" aria-label="Filtrar por funcionário"><option value="">Todos os funcionários</option></select>
+            <input type="date" id="filter-date" aria-label="Filtrar por data">
+            <button type="button" class="btn btn-secondary" id="btn-export-all">Exportar CSV</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Funcionário</th><th>Data</th><th>Hora</th><th>Marcação</th></tr></thead>
+            <tbody id="records"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

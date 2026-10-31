@@ -1,0 +1,16 @@
+services:
+  clockr:
+    build: .
+    image: clockr:latest
+    container_name: clockr
+    ports:
+      - "3000:3000"
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-troque-esta-senha}
+      APP_TIMEZONE: America/Sao_Paulo
+    volumes:
+      - clockr-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  clockr-data:

@@ -1,0 +1,16 @@
+{
+  "name": "clockr",
+  "version": "1.0.0",
+  "description": "Sistema de registro de ponto com API em Node.js, banco SQLite e Docker",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server/index.js",
+    "test": "node --disable-warning=ExperimentalWarning --test"
+  },
+  "license": "MIT"
+}

@@ -1,51 +1,125 @@
-# SISTEMA DE PONTO CORPORATIVO - PROJETO LW TECH
-=====================================
+# Clockr — Registro de ponto
 
-> Versão: 3.0
-> Desenvolvido por: [Gabriel Maieski Silva]
-> Data: Novembro/2025
+[![CI](https://github.com/gabrielmaieski/clockr/actions/workflows/ci.yml/badge.svg)](https://github.com/gabrielmaieski/clockr/actions/workflows/ci.yml)
+[![Demo](https://github.com/gabrielmaieski/clockr/actions/workflows/pages.yml/badge.svg)](https://gabrielmaieski.github.io/clockr/)
 
-## 1. DESCRIÇÃO DO PROJETO
-Este é um sistema de registo de ponto eletrónico desenvolvido em tecnologia Web (Single Page Application). O objetivo é permitir que funcionários registrem os seus horários de entrada, pausas e saída de forma simples, e que a gestão tenha acesso a relatórios consolidados.
+Sistema web de registro de ponto: funcionários marcam entrada, almoço e saída, e o gestor acompanha a equipe em tempo real e exporta relatórios.
 
-O sistema funciona inteiramente no navegador, utilizando o "LocalStorage" para guardar os dados, eliminando a necessidade de instalação de servidores complexos para uso básico.
+**Demonstração online:** [gabrielmaieski.github.io/clockr](https://gabrielmaieski.github.io/clockr/)
 
-## 2. ARQUIVOS DO PROJETO
-Para o sistema funcionar corretamente, a pasta do projeto deve conter:
+> A demonstração roda só no navegador, com dados de exemplo. Para usar com o banco de dados de verdade, suba o servidor com Docker (veja abaixo).
 
-* `ponto.html` (O código principal do sistema)
-* `image_b2e9b6.png` (A logomarca da empresa)
-* `LEIA_ME.txt` (Este arquivo de documentação)
+![Painel do gestor](docs/gestor.png)
 
-## 3. COMO EXECUTAR
-1.  Certifique-se de que o arquivo HTML e a imagem estão na mesma pasta.
-2.  Dê um duplo clique no arquivo `ponto.html`.
-3.  O sistema abrirá automaticamente no seu navegador padrão (Chrome, Edge, Firefox, etc.).
+## Funcionalidades
 
-## 4. MANUAL DE USO
+**Funcionário**
+- Cadastro e login
+- Marcação de entrada, saída para almoço, volta e saída, sempre na ordem certa
+- Linha do tempo do dia e horas trabalhadas calculadas automaticamente
+- Gráfico dos últimos 7 dias e histórico completo
+- Exportação do próprio histórico em CSV (abre direto no Excel)
 
-### A. Para Funcionários
-1.  *Login:*
-    * Utilize o seu nome de utilizador (ex: `joao, gabriel`).
-    * Digite uma senha.
-    * *Nota:* No primeiro acesso, o sistema perguntará se deseja criar uma nova conta. Confirme para se registrar.
-2.  *Marcar Ponto:*
-    * Clique nos botões coloridos correspondentes à ação (Entrada, Saída, Almoço, etc.).
-3.  *Relatório Pessoal:*
-    * Clique em "Exportar Meus Pontos" para baixar o seu histórico em formato CSV (compatível com Excel).
+**Gestor**
+- Situação da equipe agora: trabalhando, em almoço, encerrou ou sem registro
+- Indicadores do dia e horas trabalhadas de cada pessoa
+- Registros com filtro por funcionário e data
+- Relatório completo em CSV
 
-### B. Para Administradores (Gestão)
-1.  Login Administrativo:
-    * Usuário: `admin`
-    * Senha: `1234`
-2.  Funcionalidades:
-    * Visualização do total de registros.
-    * Tabela com o histórico de todos os funcionários.
-    * Botão "Baixar Relatório Completo" para exportar todos os dados da empresa.
+| Funcionário | Login |
+| --- | --- |
+| ![Tela do funcionário](docs/funcionario.png) | ![Tela de login](docs/login.png) |
 
-## 5. MANUTENÇÃO TÉCNICA
-* *Banco de Dados:* Os dados são salvos no cache do navegador (LocalStorage).
-* *Limpeza de Dados:* Para apagar todos os registros e resetar o sistema, abra o Console do Desenvolvedor (F12) e execute o comando: `localStorage.clear()`.
-* *Customização:* As cores e o layout podem ser alterados editando as variáveis `:root` no início do arquivo `.html`.
+## Arquitetura
 
-=====================================
+```
+Navegador (HTML, CSS e JavaScript)
+        │
+        ├── servidor disponível? ──► API REST (Node.js) ──► SQLite (volume Docker)
+        │
+        └── sem servidor (GitHub Pages) ──► modo demonstração (IndexedDB no navegador)
+```
+
+- **Back-end:** Node.js 22 sem dependências externas, usando os módulos nativos `node:http`, `node:sqlite` e `node:crypto`
+- **Banco de dados:** SQLite, com índices e chaves estrangeiras
+- **Segurança:** senhas com hash `scrypt` e salt, sessões com token que expiram em 7 dias, limite de tentativas de login e validação de todas as entradas
+- **Front-end:** JavaScript puro em módulos, responsivo, com a mesma regra de negócio do servidor (`public/js/core.js`)
+- **Infra:** Docker com usuário sem privilégios, volume para o banco e healthcheck
+- **CI/CD:** GitHub Actions roda os testes, faz o build e o teste da imagem Docker e publica a demonstração no GitHub Pages
+
+## Como executar
+
+### Com Docker (recomendado)
+
+```bash
+git clone https://github.com/gabrielmaieski/clockr.git
+cd clockr
+ADMIN_PASSWORD=sua-senha docker compose up -d --build
+```
+
+Acesse **http://localhost:3000** e entre com o usuário `admin` e a senha definida em `ADMIN_PASSWORD`. Os dados ficam no volume `clockr-data`, então não se perdem ao recriar o container.
+
+### Com Node.js
+
+Requer Node.js 22.13 ou mais recente. Não há nada para instalar.
+
+```bash
+ADMIN_PASSWORD=sua-senha npm start
+```
+
+### Testes
+
+```bash
+npm test
+```
+
+## API
+
+| Método | Rota | Descrição |
+| --- | --- | --- |
+| `GET` | `/api/health` | Status do serviço |
+| `POST` | `/api/auth/register` | Cria conta de funcionário |
+| `POST` | `/api/auth/login` | Login, retorna o token |
+| `POST` | `/api/auth/logout` | Encerra a sessão |
+| `GET` | `/api/me` | Usuário atual e situação do dia |
+| `GET` | `/api/punches` | Minhas marcações |
+| `POST` | `/api/punches` | Registra uma marcação (`entrada`, `saida_almoco`, `volta_almoco`, `saida`) |
+| `GET` | `/api/punches/export.csv` | Meu histórico em CSV |
+| `GET` | `/api/admin/summary` | Situação da equipe hoje (gestor) |
+| `GET` | `/api/admin/punches` | Registros com filtros `user_id` e `date` (gestor) |
+| `GET` | `/api/admin/export.csv` | Relatório completo (gestor) |
+
+As rotas protegidas usam o cabeçalho `Authorization: Bearer <token>`.
+
+## Variáveis de ambiente
+
+| Variável | Padrão | Descrição |
+| --- | --- | --- |
+| `ADMIN_PASSWORD` | `admin123` | Senha do usuário `admin`, criado na primeira execução |
+| `PORT` | `3000` | Porta do servidor |
+| `DB_FILE` | `./data/clockr.db` | Caminho do banco SQLite |
+| `APP_TIMEZONE` | `America/Sao_Paulo` | Fuso usado para definir o "dia" das marcações |
+
+## Estrutura
+
+```
+clockr/
+├── server/            # API: rotas, autenticação e banco
+├── public/            # front-end (também publicado no GitHub Pages)
+│   └── js/core.js     # regras de negócio compartilhadas
+├── test/              # testes com node:test
+├── Dockerfile
+├── docker-compose.yml
+└── .github/workflows/ # CI e deploy da demonstração
+```
+
+## Próximos passos
+
+- [ ] Deploy na AWS (EC2 com Docker) com HTTPS
+- [ ] Infraestrutura como código com Terraform
+- [ ] Ajuste manual de marcações pelo gestor
+- [ ] Banco PostgreSQL como opção para produção
+
+---
+
+Desenvolvido por **Gabriel Maieski Silva** · [LinkedIn](https://www.linkedin.com/in/gabrielmaieski) · Projeto iniciado como trabalho acadêmico e reescrito como projeto full stack.
